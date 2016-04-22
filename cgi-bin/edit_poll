@@ -10,7 +10,7 @@ use lib '@CGIBINDIR@';
 use civs_common;
 use election;
 
-my $control_key = param('key');    
+my $control_key = param('key');
 
 CheckElectionID;
 CheckControlKey($control_key);
@@ -54,9 +54,9 @@ if ($filter_tags ne 'no') {
 # Filter tags from a string, if $filter_tags is not 'no'
 sub Filter {
     if ($filter_tags ne 'no') {
-	return $tf->filter($_[0]);
+	   return $tf->filter($_[0]);
     } else {
-	return $_[0];
+	   return $_[0];
     }
 }
 

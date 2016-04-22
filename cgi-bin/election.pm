@@ -1,6 +1,6 @@
 package election;  # should be CIVS::Election, or perhaps merged with CIVS
  # Also, this should really be an object-oriented package, where
- # the constructor is parameterized on election id. 
+ # the constructor is parameterized on election id.
  # Then we wouldn't have to have an init() function.
 
 use strict;
@@ -13,7 +13,7 @@ BEGIN {
 
     $VERSION     = 1.02;
     @ISA         = qw(Exporter);
-    @EXPORT = qw(&init &ExtractVoterKeys &SaveVoterKeys 
+    @EXPORT = qw(&init &ExtractVoterKeys &SaveVoterKeys
     &CheckAuthorizationKeyForAddingVoter &CheckAuthorizationKeyForVoting
     &LockElection &UnlockElection &StartElection &IsStarted
     &CheckStarted &PointToResults &IsStopped &CheckNotStopped
@@ -30,7 +30,8 @@ BEGIN {
     $recorded_voters $ballot_reporting $reveal_voters $authorization_key
     %used_voter_keys $restrict_results $result_addrs $hash_result_key $no_opinion
     $last_vote_time $election_begin
-    %voter_keys %edata %vdata);
+    %voter_keys %edata %vdata
+    $client $hyperledger_url);
 }
 
 # Package imports
@@ -41,6 +42,8 @@ use mail;
 use Fcntl qw(:DEFAULT :flock);
 use Digest::MD5 qw(md5_hex);
 use DB_File;
+use JRPC::Client;
+use JSON::XS;
 
 # Declare exported variables
 our $election_id = '';
@@ -60,21 +63,23 @@ our $civs_supervisor = '@SUPERVISOR@';
 # Non-exported variables
 my ($db_is_open, $election_is_locked);
 
+our ($client, $hyperledger_url);
+
 &init;
 
 sub init {
     # Get election ID
     $election_id = param('id') or do {
-	&CIVS_Header($tx->Error);
+    &CIVS_Header($tx->Error);
         print p($tx->No_poll_ID), end_html();
         exit 0;
     };
     &IsWellFormedElectionID or do {
-	&CIVS_Header($tx->Error);
+        &CIVS_Header($tx->Error);
         print p($tx->Ill_formed_poll_ID($election_id)), end_html();
         exit 0;
     };
-    
+
     # Set up filename paths
     $election_dir = $home."/elections/".$election_id;
     $started_file = $election_dir."/started";
@@ -83,6 +88,9 @@ sub init {
     $election_log = $election_dir."/vote_log";
     $vote_data = $election_dir."/vote_data";
     $election_lock = $election_dir."/lock";
+
+    $client = JRPC::Client->new();
+    $hyperledger_url = '@HYPERLEDGER_URL@/chaincode';
 
     &LockElection;
     &OpenDatabase;
@@ -120,7 +128,7 @@ sub init {
     $hash_result_key = 0;
     $last_vote_time = $vdata{'last_vote_time'};
     if ($restrict_results eq 'yes') {
-	$hash_result_key = $edata{'hash_result_key'};
+        $hash_result_key = $edata{'hash_result_key'};
     }
     %voter_keys = ();
     &LoadHash('voter_keys', \%voter_keys);
@@ -147,7 +155,7 @@ sub LoadHash {
     $s = $edata{$hash_name} or $s = "";
     my @a = split /[\r\n]+/, $s;
     foreach my $k (@a) {
-    $$hash_ref{$k} = 1;
+        $$hash_ref{$k} = 1;
     }
 }
 
@@ -163,95 +171,127 @@ sub SaveHash {
 }
 
 sub LockElection {
-    if (!sysopen(ELOCK, $election_lock, &O_CREAT | &O_RDWR)) {
-        print h1($tx->Error);
-        print p($tx->No_write_access_to_lock_poll);
-          end_html();
-        exit 0;
-    }
-    flock ELOCK, &LOCK_EX;
+    # if (!sysopen(ELOCK, $election_lock, &O_CREAT | &O_RDWR)) {
+    #     print h1($tx->Error);
+    #     print p($tx->No_write_access_to_lock_poll);
+    #     end_html();
+    #     exit 0;
+    # }
+    # flock ELOCK, &LOCK_EX;
     $election_is_locked = 1;
 }
 
 sub UnlockElection {
     if ($election_is_locked) {
-        flock ELOCK, &LOCK_UN;
-        close(ELOCK);
+        # flock ELOCK, &LOCK_UN;
+        # close(ELOCK);
         $election_is_locked = 0;
     }
 }
 
 sub OpenDatabase {
-    tie %edata, "DB_File", $election_data, &O_RDWR, 0666, $DB_HASH
-        or die "Unable to tie poll db=$election_data: $!\n";
-    tie %vdata, "DB_File", $vote_data, &O_CREAT|&O_RDWR, 0666, $DB_HASH
-	or die "Unable to tie voter db=$vote_data: $!\n";
-    
+    my $req = $client->new_request($hyperledger_url);
+
+    my $res = $req->call('query', {
+        'chaincodeId' => { 'name' => '@HYPERLEDGER_CHAINCODE_ID@' },
+        'ctorMsg' => {
+            'function' => 'GetElection',
+            'args' => [$election_id]
+        }
+    });
+
+    my $result = $res->result();
+    my $hash_ref = decode_json($result->{'message'});
+    %edata = %$hash_ref;
+
+    $res = $req->call('query', {
+        'chaincodeId' => { 'name' => '@HYPERLEDGER_CHAINCODE_ID@' },
+        'ctorMsg' => {
+            'function' => 'GetVotes',
+            'args' => [$election_id]
+        }
+    });
+
+    if (!$res->error()) {
+        $result = $res->result();
+        $hash_ref = decode_json($result->{'message'});
+        %vdata = %$hash_ref;
+    }
 
     $db_is_open = 1;
 }
 
 sub CloseDatabase {
     if ($db_is_open) {
-        untie %edata;
-        untie %vdata;
+        # untie %edata;
+        # untie %vdata;
+
+        my $req = $client->new_request($hyperledger_url);
+        my $resp = $req->call('invoke', {
+            'chaincodeId' => { 'name' => '@HYPERLEDGER_CHAINCODE_ID@' },
+            'ctorMsg' => {
+                'function' => 'PutVotes',
+                'args' => [$election_id, encode_json(\%vdata)]
+            }
+        });
+        if (my $err = $resp->error()) {
+            die("$err->{'message'}");
+        }
+
         $db_is_open = 0;
     }
 }
 
 sub StartElection {
-    if (sysopen(STARTED, $started_file, &O_RDONLY)) {
-	print h1($tx->Error);
-	print p($tx->This_poll_has_already_been_started), end_html();
-	exit 0;
+    my $req = $client->new_request($hyperledger_url);
+    my $res = $req->call('invoke', {
+        'chaincodeId' => {
+            'name' => '@HYPERLEDGER_CHAINCODE_ID@'
+        },
+        'ctorMsg' => {
+            'function' => 'StartElection',
+            'args' => [$election_id]
+        }
+    });
+    if (my $err = $res->error()) {
+        die("$err->{'message'}");
     }
-    if (sysopen(STARTED, $started_file, &O_CREAT | &O_EXCL | &O_RDWR)) {
-	print STARTED "started\n";
-	close(STARTED);
-    } else {
-	print h1($tx->Error);
-	print p($tx->No_write_access_to_start_poll), end_html();
-	exit 0;
-    }
+    $edata{'started'} = 1;
 }
 
 sub IsStarted {
-    if (!open(STARTED, $started_file)) {
-	return 0;
-    } else {
-	return 1;
-    }
+    return $edata{'state'} eq 'started' || $edata{'state'} eq 'stopped';
 }
 
 sub CheckStarted {
     if (!IsStarted()) {
-	print h1($tx->Error);
-	print p($tx->Poll_does_not_exist_or_not_started), end_html();
-	exit 0;
+        print h1($tx->Error);
+        print p($tx->Poll_does_not_exist_or_not_started), end_html();
+        exit 0;
     }
 }
 
 sub PointToResults {
     if ($restrict_results ne 'yes') {
-	my $url = "@PROTO@://$thishost$civs_bin_path/results@PERLEXT@?id=$election_id";
-	print '<p>';
-	if ($public eq 'no') {
-	    print $tx->future_result_link($url);
-	} else {
-	    print $tx->current_result_link($url);
-	}
-	print '</p>', $cr;
+        my $url = "@PROTO@://$thishost$civs_bin_path/results@PERLEXT@?id=$election_id";
+        print '<p>';
+        if ($public eq 'no') {
+            print $tx->future_result_link($url);
+        } else {
+            print $tx->current_result_link($url);
+        }
+        print '</p>', $cr;
     } else {
-	print p($tx->Poll_results_will_be_available_to_the_following_users);
-	print '<ul>';
-	my @result_addrs = split /(\r\n)+/, $result_addrs;
-	foreach my $addr (@result_addrs) {
-	    $addr = TrimAddr($addr);
-	    if (CheckAddr($addr)) {
-		print li($addr), $cr;
-	    }
-	}
-	print '</ul>', $cr;
+        print p($tx->Poll_results_will_be_available_to_the_following_users);
+        print '<ul>';
+        my @result_addrs = split /(\r\n)+/, $result_addrs;
+        foreach my $addr (@result_addrs) {
+            $addr = TrimAddr($addr);
+            if (CheckAddr($addr)) {
+            print li($addr), $cr;
+            }
+        }
+        print '</ul>', $cr;
     }
 }
 
@@ -261,71 +301,72 @@ sub ReportResultReaders {
     print '<div class="list">';
     my @result_addrs = split /(\r\n)+/, $result_addrs;
     foreach my $addr (@result_addrs) {
-	$addr = TrimAddr($addr);
-	if (CheckAddr($addr)) {
-	    print tt($addr), br(), $cr;
-	}
+        $addr = TrimAddr($addr);
+        if (CheckAddr($addr)) {
+            print tt($addr), br(), $cr;
+        }
     }
     print '</div>'
 }
 
 sub PointToResultsComplete {
-  if ($restrict_results eq 'yes') {
-    &ReportResultReaders;
-  } else {
-    print "<p>", $tx->The_results_of_this_completed_poll_are_here, br, $cr;
-    print "<a href=\"@PROTO@://$thishost$civs_bin_path/results@PERLEXT@?id=$election_id\">
-       <tt>@PROTO@://$thishost$civs_bin_path/results@PERLEXT@?id=$election_id</tt></a></p>\n";
+    if ($restrict_results eq 'yes') {
+        &ReportResultReaders;
+    } else {
+        print "<p>", $tx->The_results_of_this_completed_poll_are_here, br, $cr;
+        print "<a href=\"@PROTO@://$thishost$civs_bin_path/results@PERLEXT@?id=$election_id\">
+        <tt>@PROTO@://$thishost$civs_bin_path/results@PERLEXT@?id=$election_id</tt></a></p>\n";
   }
 }
 
 sub IsStopped {
-    if (open(STOPPED, $stopped_file)) {
-	close(STOPPED);
-	return 1;
-    } else {
-	return 0;
-    }
+    # if (open(STOPPED, $stopped_file)) {
+    #     close(STOPPED);
+    #     return 1;
+    # } else {
+    #     return 0;
+    # }
+    return $edata{'state'} eq 'stopped';
 }
 sub CheckNotStopped {
     if (IsStopped()) {
-	print h1("Poll already ended");
-	print p($tx->already_ended($title));
-	PointToResultsComplete;
-	print end_html();
-	exit 0;
+        print h1("Poll already ended");
+        print p($tx->already_ended($title));
+        PointToResultsComplete;
+        print end_html();
+        exit 0;
     }
 }
 
 sub CheckStopped {
     if (!IsStopped() && (!$local_debug)) {
-	print h1($tx->Poll_not_yet_ended);
-	print p(
-	    $tx->The_poll_has_not_yet_been_ended($title,$name,$email_addr),
-	    $tx->poll_has_been_announced_to_end($election_end));
-	PointToResults;
-	print end_html();
-	exit 0;
+        print h1($tx->Poll_not_yet_ended);
+        print p(
+            $tx->The_poll_has_not_yet_been_ended($title,$name,$email_addr),
+            $tx->poll_has_been_announced_to_end($election_end));
+        PointToResults;
+        print end_html();
+        exit 0;
     }
 }
 
 sub CheckVoterKey {
     my ($voter_key, $old_voter_key, $voter) = @_;
- 
+
     if ($old_voter_key and !$voter_key) {
         my $voter_key_check = civs_hash("voter".$private_host_id.$election_id.$voter);
         if ($voter_key_check ne $old_voter_key) {
             Log("Invalid voter key $old_voter_key presented by $voter " .
                 "for election $election_id, expected $voter_key_check");
             print h1($tx->Error),
-		  p($tx->Your_voter_key_is_invalid__check_mail($voter));
-	    end_html();
+          p($tx->Your_voter_key_is_invalid__check_mail($voter));
+        end_html();
             exit 0;
         }
     } else {
         if (!$voter_keys{civs_hash($voter_key)}) {
             print h1($tx->Error), p($tx->Your_voter_key_is_invalid__check_mail('')),
-                end_html(); 
+                end_html();
             exit 0;
         }
     }
@@ -337,21 +378,22 @@ sub IsWriteinName {
 
 sub CheckNotVoted {
     my ($voter_key, $old_voter_key, $voter) = @_;
-    if ($used_voter_keys{&civs_hash($voter_key)}) {
-	print h1($tx->Already_voted);
-	print p($tx->vote_has_already_been_cast);
-	&PointToResults;
-        &main::TrySomePolls;
-        &CIVS_End;
 
-	if ($voter_key) {
-	    ElectionLog("Election: $title ($election_id) : Saw second vote "
-		    . "from voter key $voter_key");
-	} else {
-	    ElectionLog("Election: $title ($election_id) : Saw second vote "
-		    . "from (voter,key) = ($voter, $old_voter_key)");
-	}
-	exit 0;
+    if ($used_voter_keys{&civs_hash($voter_key)}) {
+        print h1($tx->Already_voted);
+        print p($tx->vote_has_already_been_cast);
+        &PointToResults;
+            &main::TrySomePolls;
+            &CIVS_End;
+
+        if ($voter_key) {
+            ElectionLog("Election: $title ($election_id) : Saw second vote "
+                . "from voter key $voter_key");
+        } else {
+            ElectionLog("Election: $title ($election_id) : Saw second vote "
+                . "from (voter,key) = ($voter, $old_voter_key)");
+        }
+        exit 0;
     }
 }
 
@@ -361,19 +403,19 @@ sub ControlKeyError {
     print end_html();
     my $t = '<undefined title>';
     if (defined($title)) {
-	$t = $title;
+        $t = $title;
     }
     my $id = '<undefined poll id>';
     if (defined($election_id)) {
-	$id = $election_id;
+        $id = $election_id;
     }
     ElectionLog("Election: $t ($id) : invalid attempt to close election (wrong key)");
     exit 0;
 }
 
 sub CheckControlKey {
-    my $control_key = shift; 
-    
+    my $control_key = shift;
+
     if (defined($edata{'hash_control_key'})) {
         my $hash_control_key = civs_hash($control_key);
         my $hash_control_key_check = $edata{'hash_control_key'};
@@ -390,8 +432,8 @@ sub CheckControlKey {
 
 sub ElectionUsesAuthorizationKey {
     return (defined($edata{'hash_authorization_key'}) &&
-	    $edata{'hash_authorization_key'} ne 'none' &&
-	    $publicize ne 'yes');
+        $edata{'hash_authorization_key'} ne 'none' &&
+        $publicize ne 'yes');
 }
 
 sub CheckAuthorizationKey {
@@ -418,8 +460,8 @@ sub CheckAuthorizationKey {
 sub CheckResultKey {
     my $result_key = shift;
     if (defined($result_key) &&
-	&civs_hash($result_key) eq $hash_result_key) {
-	return;
+    &civs_hash($result_key) eq $hash_result_key) {
+    return;
     }
     ElectionLog("Election: $title ($election_id) : invalid attempt to view election results (wrong key)");
     print h1($tx->Authorization_failure);
@@ -430,9 +472,9 @@ sub CheckResultKey {
 
 sub CheckAuthorizationKeyForAddingVoter {
     my $authorization_key = shift;
-    if (!CheckAuthorizationKey($authorization_key)) {   
+    if (!CheckAuthorizationKey($authorization_key)) {
         print h1($tx->Error),
-	p($tx->Invalid_control_key($authorization_key)); 
+        p($tx->Invalid_control_key($authorization_key));
         print end_html();
         ElectionLog("Election: $title ($election_id) : invalid attempt to add voter (wrong key)");
         exit 0;
@@ -441,7 +483,7 @@ sub CheckAuthorizationKeyForAddingVoter {
 
 sub CheckAuthorizationKeyForVoting {
     my $authorization_key = shift;
-    if (!CheckAuthorizationKey($authorization_key)) {   
+    if (!CheckAuthorizationKey($authorization_key)) {
         print h1($tx->Error), p($tx->Invalid_key);
         print end_html();
         ElectionLog("Election: $title ($election_id) : invalid attempt to add voter (wrong key)");
@@ -455,14 +497,14 @@ sub IsWellFormedElectionID {
 
 sub CheckElectionID {
     if (!IsWellFormedElectionID) {
-	if (defined($election_id) && $election_id ne '') {
-	    print h1($tx->Invalid_poll_id);
-	    print p($tx->Poll_id_not_valid($election_id));
-	    Log("Attempt to provide a bogus poll identifier: \"$election_id\"");
-	    $election_id = '';
-	}
-	print end_html();
-	exit 0;
+        if (defined($election_id) && $election_id ne '') {
+            print h1($tx->Invalid_poll_id);
+            print p($tx->Poll_id_not_valid($election_id));
+            Log("Attempt to provide a bogus poll identifier: \"$election_id\"");
+            $election_id = '';
+        }
+        print end_html();
+        exit 0;
     }
 }
 
@@ -476,7 +518,7 @@ sub ElectionLog {
         print h1($tx->Error),
           p($tx->Unable_to_append_to_poll_log);
           end_html();
-	exit 0;
+    exit 0;
     }
     print ELECTION_LOG $now." ".$remote_ip_address." ".$log_msg."\n";
     close ELECTION_LOG;
@@ -490,7 +532,7 @@ sub GenerateVoterKey {
     my $voter_key = civs_hash($voter_email, $authorization_key,
         $private_host_id);
     if ($reveal_voters eq 'yes') {
-	$edata{"email_addr $voter_key"} = $voter_email;
+        $edata{"email_addr $voter_key"} = $voter_email;
     }
     return $voter_key;
 }
@@ -504,7 +546,7 @@ sub SendBody {
     $plain =~ s/\n\n/\n/g;
     $plain =~ s/^\r*//g;
     $plain =~ s/^\n*//g;
-    
+
     Send 'Mime-Version: 1.0';
     Send "Content-Type: multipart/alternative; boundary=$boundary";
     Send '';
@@ -532,12 +574,12 @@ sub SendKeys {
     my @addresses =  &unique_elements( @{$addresses_ref} );
     if (!($local_debug)) { ConnectMail; }
     foreach my $v (@addresses) {
-	$v = TrimAddr($v);
-	if ($v eq '') { next; }
-	if (!CheckAddr($v)) {
-	    print $tx->Invalid_email_address($v), $cr;
-	    next;
-	}
+    $v = TrimAddr($v);
+    if ($v eq '') { next; }
+    if (!CheckAddr($v)) {
+        print $tx->Invalid_email_address($v), $cr;
+        next;
+    }
 
         my $url = "";
         if ($public eq 'yes') {
@@ -561,70 +603,70 @@ sub SendKeys {
         if ($local_debug) {
             print "voter link: <a href=\"$url\">$url</a>\n";
         } else {
-	    sub SendURL {
-	      (my $url) = @_;
-	      Send MakeURL($url);
-	    }
-	    sub MakeURL {
-	      (my $url) = @_;
-	      return "<pre>\r\n    <a href=\"$url\">$url</a>\r\n</pre>";
-	    }
+        sub SendURL {
+          (my $url) = @_;
+          Send MakeURL($url);
+        }
+        sub MakeURL {
+          (my $url) = @_;
+          return "<pre>\r\n    <a href=\"$url\">$url</a>\r\n</pre>";
+        }
 
             ElectionLog("Sending mail to a voter for poll $election_id\n");
             print $tx->Sending_mail_to_voter_v($v), $cr; STDOUT->flush();
-	    my $uniqueid = &SecureNonce;
-	    my $messageid = "CIVS-$election_id.$uniqueid\@$thishost";
+        my $uniqueid = &SecureNonce;
+        my $messageid = "CIVS-$election_id.$uniqueid\@$thishost";
 
-	    Send "mail from:<$civs_supervisor>"; ConsumeSMTP;
+        Send "mail from:<$civs_supervisor>"; ConsumeSMTP;
             Send "rcpt to:<$v>"; ConsumeSMTP;
             Send "data"; ConsumeSMTP;
-	    SendHeader ('From',
-		$tx->CIVS_poll_supervisor($name),
-		"<$civs_supervisor>");
+        SendHeader ('From',
+        $tx->CIVS_poll_supervisor($name),
+        "<$civs_supervisor>");
             SendHeader('Sender', $civs_supervisor);
             SendHeader('Reply-To', $email_addr);
-	    SendHeader('Message-ID', "<$messageid>");
+        SendHeader('Message-ID', "<$messageid>");
             SendHeader('To', "<$v>");
-	    SendHeader('Subject', $tx->poll_email_subject($title));
-	    Send 'Content-Transfer-Encoding: 8bit';
+        SendHeader('Subject', $tx->poll_email_subject($title));
+        Send 'Content-Transfer-Encoding: 8bit';
             SendHeader('Return-Path', $email_addr);
             Send 'X-Mailer: CIVS';
-	    my $html =
+        my $html =
 "<!DOCTYPE html PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\">
 <html>
 <head>
 <meta content=\"text/html;charset=UTF-8\" http-equiv=\"Content-Type\"
 </head>
 <body><p>";
-	    $html .= $tx->voter_mail_intro($title, $name, $email_addr);
-	    $html .= '</p>';
+        $html .= $tx->voter_mail_intro($title, $name, $email_addr);
+        $html .= '</p>';
 
-	    if (!($description =~ m/^(\s)*$/)) {
-		$html .= '<div style="border-style: solid; border-width: 1px; background-color: #f0f0f0; color: black">'.$cr.$cr;
-		$html .= '<b>' . $tx->Description_of_poll . '</b>' . $cr;
-		$description =~ s/([\r\n])\.([\r\n])/$1 .$2/g; # escape lone dot
-		$html .= $description.'</div>'.$cr;
-	    }
-	    $html .= $cr.$cr.'<p>'. $tx->if_you_would_like_to_vote_please_visit;
-	    $html .= MakeURL($url);
+        if (!($description =~ m/^(\s)*$/)) {
+        $html .= '<div style="border-style: solid; border-width: 1px; background-color: #f0f0f0; color: black">'.$cr.$cr;
+        $html .= '<b>' . $tx->Description_of_poll . '</b>' . $cr;
+        $description =~ s/([\r\n])\.([\r\n])/$1 .$2/g; # escape lone dot
+        $html .= $description.'</div>'.$cr;
+        }
+        $html .= $cr.$cr.'<p>'. $tx->if_you_would_like_to_vote_please_visit;
+        $html .= MakeURL($url);
 
-	    $html .= $tx->This_is_your_private_URL . '</p><p>';
-	    if ($reveal_voters ne 'yes') {
-		$html .= $tx->Your_privacy_will_not_be_violated;
-	    } else {
-		$html .= $tx->This_is_a_nonanonymous_poll;
-	    }
-	    $html .= $cr."</p><p>".$tx->poll_has_been_announced_to_end($election_end);
+        $html .= $tx->This_is_your_private_URL . '</p><p>';
+        if ($reveal_voters ne 'yes') {
+        $html .= $tx->Your_privacy_will_not_be_violated;
+        } else {
+        $html .= $tx->This_is_a_nonanonymous_poll;
+        }
+        $html .= $cr."</p><p>".$tx->poll_has_been_announced_to_end($election_end);
             if ($restrict_results ne 'yes') {
-		$html .= ' ' .
-		  $tx->To_view_the_results_at_the_end(MakeURL("@PROTO@://$thishost$civs_bin_path/".
-				"results@PERLEXT@?id=$election_id"));
-	    }
-	    $html .= '<p>' . $tx->For_more_information . $cr .
-		MakeURL($civs_home).'</p>
+        $html .= ' ' .
+          $tx->To_view_the_results_at_the_end(MakeURL("@PROTO@://$thishost$civs_bin_path/".
+                "results@PERLEXT@?id=$election_id"));
+        }
+        $html .= '<p>' . $tx->For_more_information . $cr .
+        MakeURL($civs_home).'</p>
 </body>
 </html>';
-	    SendBody $html;
+        SendBody $html;
             Send '.'; ConsumeSMTP;
         }
     }

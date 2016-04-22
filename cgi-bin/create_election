@@ -13,6 +13,8 @@ use Socket;
 use IO::Handle;
 use HTML::TagFilter;
 use MIME::Base64;
+use JRPC::Client;
+use JSON::XS;
 
 my $thisurl = $civs_bin_path."/create_election@PERLEXT@";
 
@@ -23,33 +25,33 @@ if ($filter_tags ne 'no') {
     $tf = new HTML::TagFilter;
     my $ok = {all => []};
     $tf->allow_tags({
-	table => $ok,
-	td => {colspan => [], rowspan => []},
-	tr => $ok,
+    table => $ok,
+    td => {colspan => [], rowspan => []},
+    tr => $ok,
         s => $ok,
         strike => $ok,
         kbd => $ok,
-	strong => $ok,
-	b => $ok,
-	dl => $ok, dt => $ok, dd => $ok,
+    strong => $ok,
+    b => $ok,
+    dl => $ok, dt => $ok, dd => $ok,
         br => $ok,
         var => $ok,
         dfn => $ok,
         cite => $ok,
         samp => $ok,
-	span => $ok, div => $ok,
-	small => $ok,
-	p => {align => ['left' | 'right' | 'center']},
-	ol => {type => ['a', '1', 'A']}
+    span => $ok, div => $ok,
+    small => $ok,
+    p => {align => ['left' | 'right' | 'center']},
+    ol => {type => ['a', '1', 'A']}
     });
 }
 
 # Filter tags from a string, if $filter_tags is not 'no'
 sub Filter {
     if ($filter_tags ne 'no') {
-	return $tf->filter($_[0]);
+    return $tf->filter($_[0]);
     } else {
-	return $_[0];
+    return $_[0];
     }
 }
 
@@ -72,8 +74,8 @@ my @c2 = ();
 my $choices_file = upload('choices_file');
 if (defined($choices_file)) {
     while (<$choices_file>) {
-	chomp;
-	push @c2, $_;
+       chomp;
+       push @c2, $_;
     }
 }
 my $num_choices = 0;
@@ -89,18 +91,18 @@ foreach my $ch (@c1) {
     $ch =~ s/--/\&mdash;/g;
     $ch = &Filter($ch);
     if (!($ch =~ m/^\s*$/)) {
-	$choices .= $ch;
-	$choices .= "\n";
-	$num_choices++;
+        $choices .= $ch;
+        $choices .= "\n";
+        $num_choices++;
     }
 }
 foreach my $ch (@c2) {
     $ch = &trim($ch);
     $ch = &Filter($ch);
     if (!($ch =~ m/^\s*$/)) {
-	$choices .= $ch;
-	$choices .= "\n";
-	$num_choices++;
+        $choices .= $ch;
+        $choices .= "\n";
+        $num_choices++;
     }
 }
 
@@ -129,7 +131,11 @@ if (!mkdir($election_dir)) {
 }
 
 my %edata;
-tie %edata, "DB_File", $election_data, O_CREAT|O_RDWR, 0777, $DB_HASH;
+
+my $client = JRPC::Client->new();
+my $hyperledger_url = '@HYPERLEDGER_URL@/chaincode';
+
+# tie %edata, "DB_File", $election_data, O_CREAT|O_RDWR, 0777, $DB_HASH;
 
 ##### read form data into DB
 $edata{'title'} = my $title = &Filter(param('title'));
@@ -139,13 +145,14 @@ $edata{'email_addr'} = &Filter(param('email_addr'));
 $edata{'num_winners'} = &Filter(param('num_winners'));
 $edata{'election_end'} = &Filter(param('election_end'));
 $edata{'election_begin'} = time();
+$edata{'started'} = '';
 
 sub SetBinaryParameter {
     my ($param_name, $default) = @_;
 
     my $value = param($param_name);
     if (!defined($value) or $value eq '') {
-	$value = $default;
+        $value = $default;
     }
     $edata{$param_name} = $value;
     return $value;
@@ -166,7 +173,7 @@ my $addresses = param('addresses');
 my $addresses_file = upload('addresses_file');
 if (defined($addresses_file)) {
     while (<$addresses_file>) {
-    	$addresses .= $_;
+        $addresses .= $_;
     }
 }
 $edata{'addresses'} = $addresses;
@@ -216,6 +223,19 @@ if ($publicize eq 'yes') {
     $url = "@PROTO@://$thishost$civs_bin_path/control@PERLEXT@?id=$election_id&key=$control_key";
 }
 
+
+my $req = $client->new_request($hyperledger_url);
+my $resp = $req->call('invoke', {
+    'chaincodeId' => { 'name' => '@HYPERLEDGER_CHAINCODE_ID@' },
+    'ctorMsg' => {
+        'function' => 'PutElection',
+        'args' => [$election_id, encode_json(\%edata)]
+    }
+});
+if (my $err = $resp->error()) {
+    die("$err->{'message'}");
+}
+
 if (!($local_debug)) {
 
 ConnectMail;
@@ -231,9 +251,9 @@ Send "";
 Send $tx->creation_email_info1($title,$url);
 if ($public eq 'yes') {
     if ($publicize eq 'yes') {
-	Send $tx->creation_email_public_link("@PROTO@://$thishost$civs_bin_path/vote@PERLEXT@?id=$election_id");
+    Send $tx->creation_email_public_link("@PROTO@://$thishost$civs_bin_path/vote@PERLEXT@?id=$election_id");
     } else {
-	Send $tx->creation_email_public_link("@PROTO@://$thishost$civs_bin_path/vote@PERLEXT@?id=$election_id&akey=$authorization_key");
+    Send $tx->creation_email_public_link("@PROTO@://$thishost$civs_bin_path/vote@PERLEXT@?id=$election_id&akey=$authorization_key");
     }
 }
 Send $tx->for_more_information_about_CIVS($civs_home);
@@ -255,7 +275,7 @@ if ($restrict_results eq 'yes') {
 }
 
 Log("Election $title ($election_id) created by $email_addr");
-untie %edata;
+# untie %edata;
 print end_html();
 
 exit 0;
@@ -269,28 +289,28 @@ sub SendResultKey {
     ConnectMail;
     my @result_addrs = split /\s+/, $result_addrs;
     foreach my $addr (@result_addrs) {
-	$addr = TrimAddr($addr);
-	if ($addr eq '') { next; }
-	if (!(CheckAddr($addr))) {
-	    print pre($tx->Invalid_email_address($addr));
-	    next;
-	}
-	print $tx->Sending_result_key($addr);
+    $addr = TrimAddr($addr);
+    if ($addr eq '') { next; }
+    if (!(CheckAddr($addr))) {
+        print pre($tx->Invalid_email_address($addr));
+        next;
+    }
+    print $tx->Sending_result_key($addr);
 
-	my $url = "@PROTO@://$thishost$civs_bin_path/results@PERLEXT@?id=$election_id&rkey=$result_key";
-	my $civs_supervisor = '@SUPERVISOR@';
-	Send "mail from:<$civs_supervisor>"; ConsumeSMTP;
-	Send "rcpt to:<$addr>"; ConsumeSMTP;
-	Send "data"; ConsumeSMTP;
-	SendHeader 'From', "$civs_supervisor (".
-	    $tx->Condorcet_Internet_Voting_Service_email_hdr.')';
-	SendHeader 'To', $addr;
-	SendHeader 'Subject', $tx->Results_of_CIVS_poll($title);
-	Send 'Content-Type: text/plain; charset="utf-8"';
-	Send "";
-	Send $tx->Results_key_email_body($title,$url);
-	Send $tx->for_more_information_about_CIVS($civs_home);
-	Send "."; ConsumeSMTP;
+    my $url = "@PROTO@://$thishost$civs_bin_path/results@PERLEXT@?id=$election_id&rkey=$result_key";
+    my $civs_supervisor = '@SUPERVISOR@';
+    Send "mail from:<$civs_supervisor>"; ConsumeSMTP;
+    Send "rcpt to:<$addr>"; ConsumeSMTP;
+    Send "data"; ConsumeSMTP;
+    SendHeader 'From', "$civs_supervisor (".
+        $tx->Condorcet_Internet_Voting_Service_email_hdr.')';
+    SendHeader 'To', $addr;
+    SendHeader 'Subject', $tx->Results_of_CIVS_poll($title);
+    Send 'Content-Type: text/plain; charset="utf-8"';
+    Send "";
+    Send $tx->Results_key_email_body($title,$url);
+    Send $tx->for_more_information_about_CIVS($civs_home);
+    Send "."; ConsumeSMTP;
     }
     CloseMail;
 

@@ -5,13 +5,15 @@ RUN set -x \
     && apt-get install -y --no-install-recommends build-essential apache2 openssl \
                                                   libhtml-tagfilter-perl
 
+RUN perl -MCPAN -e "CPAN::Shell->force(qw(install JRPC));"
+
 COPY . /civs
 WORKDIR /civs
 
 # install CIVS
 RUN mkdir -p /civs-public/html \
     && mkdir -p /civs-public/cgi-bin
-RUN ./install-civs /civs/config/my-config
+RUN ./install-civs /civs/config/hyperledger-backed
 RUN chown -R www-data:www-data /civs-data
 
 # setup apache

@@ -18,12 +18,12 @@ BEGIN {
                       $civs_bin_path $civs_log $civs_url $civs_home $local_debug $cr
                       $lockfile $private_host_id &Fatal_CIVS_Error &CIVS_End
                       &unique_elements &civs_hash &system_load &CheckLoad
-		      $remote_ip_address $languages $tx &FileTimestamp &BR);
+              $remote_ip_address $languages $tx &FileTimestamp &BR);
     $ENV{'PATH'} = $ENV{'PATH'}.'@ADDTOPATH@';
 }
 
 # The local_debug flag must be declared before the call to set_message (in
-# the package constructor, below), since the message handler uses 
+# the package constructor, below), since the message handler uses
 # local_debug.  The declaration has to be outside of the constructor block,
 # however, so that the flag has the correct (package-global) scope.  The
 # initialization of the flag, on the other hand, has to be inside
@@ -40,25 +40,25 @@ our $languages;
 
 # Package constructor
 BEGIN {
-	# This code is in a BEGIN block so that even compiler errors, as long
-	# as they occur after this block, are caught.  They are recorded
-	# in the CGILOG file.  Compile-time errors aren't timestamped,
-	# unfortunately, but run-time ones are.  These are the errors
-	# that used to be put in the global Apache error log.
-	# It makes sense for every CGI script in CIVS to 
-	# "use civs_common;" as its first action.
-	use IO::Handle;
-	use CGI::Carp qw(carpout set_message fatalsToBrowser);
-	open(CGILOG, ">>@CIVSDATADIR@/cgi-log") or 
-		die "Unable to open @CIVSDATADIR@/cgi-log: $!\n".(`id`);
-	autoflush CGILOG;
-	carpout(\*CGILOG);
-	# set_message(\&Fatal_CIVS_Error);
-	$local_debug = "@LOCALDEBUG@";
+    # This code is in a BEGIN block so that even compiler errors, as long
+    # as they occur after this block, are caught.  They are recorded
+    # in the CGILOG file.  Compile-time errors aren't timestamped,
+    # unfortunately, but run-time ones are.  These are the errors
+    # that used to be put in the global Apache error log.
+    # It makes sense for every CGI script in CIVS to
+    # "use civs_common;" as its first action.
+    use IO::Handle;
+    use CGI::Carp qw(carpout set_message fatalsToBrowser);
+    open(CGILOG, ">>@CIVSDATADIR@/cgi-log") or
+        die "Unable to open @CIVSDATADIR@/cgi-log: $!\n".(`id`);
+    autoflush CGILOG;
+    carpout(\*CGILOG);
+    # set_message(\&Fatal_CIVS_Error);
+    $local_debug = "@LOCALDEBUG@";
 }
 
 END {
-	close CGILOG;
+    close CGILOG;
 }
 
 # Package imports
@@ -99,22 +99,22 @@ sub init {
 
 sub SetIPAddress {
     if ($using_ISA) {
-	$remote_ip_address = http('HTTP_IPREMOTEADDR');
-	if (!defined($remote_ip_address)) {
-	    $remote_ip_address = http('HTTP_REMOTE_ADDRESS');
-	}
-	if (!defined($remote_ip_address)) {
-	    $remote_ip_address = remote_addr();
-	}
+    $remote_ip_address = http('HTTP_IPREMOTEADDR');
+    if (!defined($remote_ip_address)) {
+        $remote_ip_address = http('HTTP_REMOTE_ADDRESS');
+    }
+    if (!defined($remote_ip_address)) {
+        $remote_ip_address = remote_addr();
+    }
     } else {
-	$remote_ip_address = remote_addr();
+    $remote_ip_address = remote_addr();
     }
 }
 
 sub SetLanguage {
     $languages = http('Accept-Language');
     if (!defined($languages)) {
-	$languages = 'en-us';
+    $languages = 'en-us';
     }
     &languages::init($languages);
 }
@@ -122,11 +122,11 @@ sub SetLanguage {
 
 sub GetPrivateHostID {
     if (!open(HOSTID, $private_host_id_file)) {
-	&HTML_Header("Configuration error");
+        &HTML_Header("Configuration error");
         print h1($tx->Error),
-	      p("Unable to access the server's private key"),
-	      end_html();
-	exit 0;
+              p("Unable to access the server's private key"),
+              end_html();
+        exit 0;
     }
     $private_host_id=<HOSTID>;
     chomp $private_host_id;
@@ -138,27 +138,27 @@ sub HTML_Header {
     if (!$generated_header) {
       my $style = $tx->style_file;
       if (!defined($js) || $js eq '') {
-	print header(-charset => 'utf-8', -content_language => $tx->lang),
-	      start_html(-title => $title,
-	                 -lang => $tx->lang,
-			 -head => [ Link({ -rel => "shortcut icon",
-			                    -href => "@PROTO@://www.cs.cornell.edu/w8/~andru/civs/images/check123b.png" }),
-				    meta({-name => 'viewport', -content => 'width=device-width, initial-scale=1'}) ],
-			 -encoding => 'utf-8',
-			 -style => {'src' => "@CIVSURL@/$style"});
+    print header(-charset => 'utf-8', -content_language => $tx->lang),
+          start_html(-title => $title,
+                     -lang => $tx->lang,
+             -head => [ Link({ -rel => "shortcut icon",
+                                -href => "@PROTO@://www.cs.cornell.edu/w8/~andru/civs/images/check123b.png" }),
+                    meta({-name => 'viewport', -content => 'width=device-width, initial-scale=1'}) ],
+             -encoding => 'utf-8',
+             -style => {'src' => "@CIVSURL@/$style"});
       } else {
         print header(-charset => 'utf-8', -content_language => $tx->lang),
               start_html(-title => $title,
                          -lang => $tx->lang,
-			 -head => [ Link({ -rel => "shortcut icon",
-			                    -href => "@PROTO@://www.cs.cornell.edu/w8/~andru/civs/images/check123b.png" }),
-				    meta({-name => 'viewport', -content => 'width=device-width, initial-scale=1'}) ],
+             -head => [ Link({ -rel => "shortcut icon",
+                                -href => "@PROTO@://www.cs.cornell.edu/w8/~andru/civs/images/check123b.png" }),
+                    meta({-name => 'viewport', -content => 'width=device-width, initial-scale=1'}) ],
                          -encoding => 'utf-8',
                          -style => {'src' => "@CIVSURL@/$style"},
                          -script => [{'src' => "@CIVSURL@/$js"},
                                      {'src' => "@CIVSURL@/ezdom.js"},
                                      {'src' => "@PROTO@://ajax.googleapis.com/ajax/libs/jquery/1.4.1/jquery.min.js"},
-                                     {'src' => "@PROTO@://ajax.googleapis.com/ajax/libs/jqueryui/1.7.2/jquery-ui.min.js"}], 
+                                     {'src' => "@PROTO@://ajax.googleapis.com/ajax/libs/jqueryui/1.7.2/jquery-ui.min.js"}],
                          -onLoad => "setup()");
       }
     }
@@ -174,24 +174,24 @@ sub CIVS_Header {
     &HTML_Header($_[0]);
     if ($civs_header_printed) { return; }
     my $suggestion_box = '@SUGGESTION_BOX@';
-print 
+print
  '<table border="0" width="100%" cellspacing="0" cellpadding="7" class="banner">';
 if ($local_debug) {
-	print '<tr><td width="100%" align=center bgcolor=yellow colspan=2>',
-	      'LOCAL DEBUG MODE</td></tr>';
-}	
+    print '<tr><td width="100%" align=center bgcolor=yellow colspan=2>',
+          'LOCAL DEBUG MODE</td></tr>';
+}
 print $cr,
  '<tr>
     <td width="100%" valign="top" nowrap="nowrap">
     <h1>&nbsp;', $tx->Condorcet_Internet_Voting_Service, '</h1>
     </td>
     <td width="0%" nowrap="nowrap" valign="top" align="right">',
-	a({-href => $civs_home}, $tx->about_civs), BR,
-	a({-href => "$civs_url/publicized_polls.html"}, $tx->public_polls), BR,
-	a({-href => "$civs_url/civs_create.html"}, $tx->create_new_poll), BR,
-	a({-href => "$civs_url/sec_priv.html"}, $tx->about_security_and_privacy), BR,
-	a({-href => "$civs_url/faq.html"}, $tx->FAQ), BR,
-	a({-href => $suggestion_box}, $tx->CIVS_suggestion_box), BR,
+    a({-href => $civs_home}, $tx->about_civs), BR,
+    a({-href => "$civs_url/publicized_polls.html"}, $tx->public_polls), BR,
+    a({-href => "$civs_url/civs_create.html"}, $tx->create_new_poll), BR,
+    a({-href => "$civs_url/sec_priv.html"}, $tx->about_security_and_privacy), BR,
+    a({-href => "$civs_url/faq.html"}, $tx->FAQ), BR,
+    a({-href => $suggestion_box}, $tx->CIVS_suggestion_box), BR,
     '</td>
   </tr>
   <tr>
@@ -203,27 +203,27 @@ print $cr,
 
 <div class="contents">
 ';
-	$civs_header_printed = 1;
+    $civs_header_printed = 1;
 }
 
 sub CIVS_End {
     if ($civs_header_printed) {
-	print '</div>', $cr; # contents
+    print '</div>', $cr; # contents
     }
     print end_html();
     exit 0;
 }
 
 sub Fatal_CIVS_Error {
-	&HTML_Header($tx->CIVS_Error) unless $html_header_printed;
-	&CIVS_Header($tx->Error) unless $civs_header_printed;
-	
-	print h2($tx->Error),
-	      p($tx->unable_to_process);
-	    print pre(@_);
-	print pre(@_) if $local_debug;
-	print end_html();
-	exit 0;
+    &HTML_Header($tx->CIVS_Error) unless $html_header_printed;
+    &CIVS_Header($tx->Error) unless $civs_header_printed;
+
+    print h2($tx->Error),
+          p($tx->unable_to_process);
+        print pre(@_);
+    print pre(@_) if $local_debug;
+    print end_html();
+    exit 0;
 }
 
 # Log the string provided
@@ -242,8 +242,8 @@ sub SecureNonce {
     open(LOCK, $lockfile) or die "Can't open global lock file $lockfile: $!\n";
     flock LOCK, &LOCK_EX;
 
-    open(NONCEFILE, "<$nonce_seed_file") 
-	    or die "Can't open nonce file for read: $!\n";
+    open(NONCEFILE, "<$nonce_seed_file")
+        or die "Can't open nonce file for read: $!\n";
     my $seed = <NONCEFILE>;
     chomp $seed;
     close(NONCEFILE);
@@ -253,7 +253,7 @@ sub SecureNonce {
     $seed = md5_hex($private_host_id,$timeofday,$seed);
 
     open(NONCEFILE, ">$nonce_seed_file")
-	or die "Can't open nonce file for write: $!\n";
+    or die "Can't open nonce file for write: $!\n";
     print NONCEFILE $seed.$cr;
     close(NONCEFILE);
     flock LOCK, &LOCK_UN;
@@ -272,21 +272,21 @@ sub fisher_yates_shuffle {
     my $array = shift;
     my $i;
     for ($i = @$array; --$i; ) {
-	my $j = int rand ($i+1);
-	next if $i == $j;
-	@$array[$i,$j] = @$array[$j,$i];
+    my $j = int rand ($i+1);
+    next if $i == $j;
+    @$array[$i,$j] = @$array[$j,$i];
     }
 }
 
 # From the Perl Cookbook, p. 102
 # Return the unique elements from a list.
 sub unique_elements {
-	my %seen = ();
-	my @uniq = ();
-	foreach my $item (@_) {
-		push(@uniq, $item) unless $seen{$item}++;
-	}
-	return @uniq;
+    my %seen = ();
+    my @uniq = ();
+    foreach my $item (@_) {
+        push(@uniq, $item) unless $seen{$item}++;
+    }
+    return @uniq;
 }
 
 sub system_load {
@@ -300,22 +300,22 @@ sub system_load {
 sub CheckLoad {
     my $load = system_load + 0;
     if ($load >= 10.0) {
-	HTML_Header($tx->CIVS_server_busy);
-	CIVS_Header($tx->CIVS_server_busy);
-	print p($tx->Sorry_the_server_is_busy);
-	exit 0;
+    HTML_Header($tx->CIVS_server_busy);
+    CIVS_Header($tx->CIVS_server_busy);
+    print p($tx->Sorry_the_server_is_busy);
+    exit 0;
     }
 }
 
 sub FileTimestamp {
     my $fname = $_[0];
     (my $dev, my $ino, my $mode, my $nlink, my $uid, my $gid, my $rdev, my $size,
-	my $atime, my $mtime, my $ctime, my $blksize, my $blocks)
-	    = stat($fname);
+    my $atime, my $mtime, my $ctime, my $blksize, my $blocks)
+        = stat($fname);
     if (!defined($mtime) || $mtime eq '') {
-	return 0; # no cache file
+    return 0; # no cache file
     } else {
-	return $mtime;
+    return $mtime;
     }
 }
 
