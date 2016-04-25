@@ -223,11 +223,20 @@ sub OpenDatabase {
 
 sub CloseDatabase {
     if ($db_is_open) {
-        # untie %edata;
-        # untie %vdata;
-
         my $req = $client->new_request($hyperledger_url);
         my $resp = $req->call('invoke', {
+            'chaincodeId' => { 'name' => '@HYPERLEDGER_CHAINCODE_ID@' },
+            'ctorMsg' => {
+                'function' => 'PutElection',
+                'args' => [$election_id, encode_json(\%edata)]
+            }
+        });
+        if (my $err = $resp->error()) {
+            die("$err->{'message'}");
+        }
+
+        $req = $client->new_request($hyperledger_url);
+        $resp = $req->call('invoke', {
             'chaincodeId' => { 'name' => '@HYPERLEDGER_CHAINCODE_ID@' },
             'ctorMsg' => {
                 'function' => 'PutVotes',
@@ -573,13 +582,14 @@ sub SendKeys {
     my $addresses_ref = shift;
     my @addresses =  &unique_elements( @{$addresses_ref} );
     if (!($local_debug)) { ConnectMail; }
+
     foreach my $v (@addresses) {
-    $v = TrimAddr($v);
-    if ($v eq '') { next; }
-    if (!CheckAddr($v)) {
-        print $tx->Invalid_email_address($v), $cr;
-        next;
-    }
+        $v = TrimAddr($v);
+        if ($v eq '') { next; }
+        if (!CheckAddr($v)) {
+            print $tx->Invalid_email_address($v), $cr;
+            next;
+        }
 
         my $url = "";
         if ($public eq 'yes') {
@@ -603,70 +613,68 @@ sub SendKeys {
         if ($local_debug) {
             print "voter link: <a href=\"$url\">$url</a>\n";
         } else {
-        sub SendURL {
-          (my $url) = @_;
-          Send MakeURL($url);
-        }
-        sub MakeURL {
-          (my $url) = @_;
-          return "<pre>\r\n    <a href=\"$url\">$url</a>\r\n</pre>";
-        }
+            sub SendURL {
+              (my $url) = @_;
+              Send MakeURL($url);
+            }
+            sub MakeURL {
+              (my $url) = @_;
+              return "<pre>\r\n    <a href=\"$url\">$url</a>\r\n</pre>";
+            }
 
             ElectionLog("Sending mail to a voter for poll $election_id\n");
             print $tx->Sending_mail_to_voter_v($v), $cr; STDOUT->flush();
-        my $uniqueid = &SecureNonce;
-        my $messageid = "CIVS-$election_id.$uniqueid\@$thishost";
+            my $uniqueid = &SecureNonce;
+            my $messageid = "CIVS-$election_id.$uniqueid\@$thishost";
 
-        Send "mail from:<$civs_supervisor>"; ConsumeSMTP;
+            Send "mail from:<$civs_supervisor>"; ConsumeSMTP;
             Send "rcpt to:<$v>"; ConsumeSMTP;
             Send "data"; ConsumeSMTP;
-        SendHeader ('From',
-        $tx->CIVS_poll_supervisor($name),
-        "<$civs_supervisor>");
+            SendHeader ('From', $tx->CIVS_poll_supervisor($name), "<$civs_supervisor>");
             SendHeader('Sender', $civs_supervisor);
             SendHeader('Reply-To', $email_addr);
-        SendHeader('Message-ID', "<$messageid>");
+            SendHeader('Message-ID', "<$messageid>");
             SendHeader('To', "<$v>");
-        SendHeader('Subject', $tx->poll_email_subject($title));
-        Send 'Content-Transfer-Encoding: 8bit';
+            SendHeader('Subject', $tx->poll_email_subject($title));
+            Send 'Content-Transfer-Encoding: 8bit';
             SendHeader('Return-Path', $email_addr);
             Send 'X-Mailer: CIVS';
-        my $html =
-"<!DOCTYPE html PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\">
-<html>
-<head>
-<meta content=\"text/html;charset=UTF-8\" http-equiv=\"Content-Type\"
-</head>
-<body><p>";
-        $html .= $tx->voter_mail_intro($title, $name, $email_addr);
-        $html .= '</p>';
+            my $html =
+    "<!DOCTYPE html PUBLIC \"-//W3C//DTD HTML 4.01 Transitional//EN\">
+    <html>
+    <head>
+    <meta content=\"text/html;charset=UTF-8\" http-equiv=\"Content-Type\"
+    </head>
+    <body><p>";
+            $html .= $tx->voter_mail_intro($title, $name, $email_addr);
+            $html .= '</p>';
 
-        if (!($description =~ m/^(\s)*$/)) {
-        $html .= '<div style="border-style: solid; border-width: 1px; background-color: #f0f0f0; color: black">'.$cr.$cr;
-        $html .= '<b>' . $tx->Description_of_poll . '</b>' . $cr;
-        $description =~ s/([\r\n])\.([\r\n])/$1 .$2/g; # escape lone dot
-        $html .= $description.'</div>'.$cr;
-        }
-        $html .= $cr.$cr.'<p>'. $tx->if_you_would_like_to_vote_please_visit;
-        $html .= MakeURL($url);
+            if (!($description =~ m/^(\s)*$/)) {
+                $html .= '<div style="border-style: solid; border-width: 1px; background-color: #f0f0f0; color: black">'.$cr.$cr;
+                $html .= '<b>' . $tx->Description_of_poll . '</b>' . $cr;
+                $description =~ s/([\r\n])\.([\r\n])/$1 .$2/g; # escape lone dot
+                $html .= $description.'</div>'.$cr;
+            }
+            $html .= $cr.$cr.'<p>'. $tx->if_you_would_like_to_vote_please_visit;
+            $html .= MakeURL($url);
 
-        $html .= $tx->This_is_your_private_URL . '</p><p>';
-        if ($reveal_voters ne 'yes') {
-        $html .= $tx->Your_privacy_will_not_be_violated;
-        } else {
-        $html .= $tx->This_is_a_nonanonymous_poll;
-        }
-        $html .= $cr."</p><p>".$tx->poll_has_been_announced_to_end($election_end);
+            $html .= $tx->This_is_your_private_URL . '</p><p>';
+            if ($reveal_voters ne 'yes') {
+                $html .= $tx->Your_privacy_will_not_be_violated;
+            } else {
+                $html .= $tx->This_is_a_nonanonymous_poll;
+            }
+            $html .= $cr."</p><p>".$tx->poll_has_been_announced_to_end($election_end);
             if ($restrict_results ne 'yes') {
-        $html .= ' ' .
-          $tx->To_view_the_results_at_the_end(MakeURL("@PROTO@://$thishost$civs_bin_path/".
-                "results@PERLEXT@?id=$election_id"));
-        }
-        $html .= '<p>' . $tx->For_more_information . $cr .
-        MakeURL($civs_home).'</p>
-</body>
-</html>';
-        SendBody $html;
+                $html .= ' ' .
+                $tx->To_view_the_results_at_the_end(MakeURL("@PROTO@://$thishost$civs_bin_path/".
+                    "results@PERLEXT@?id=$election_id"));
+            }
+            $html .= '<p>' . $tx->For_more_information . $cr .
+            MakeURL($civs_home).'</p>
+        </body>
+    </html>';
+            SendBody $html;
             Send '.'; ConsumeSMTP;
         }
     }
