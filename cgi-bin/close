@@ -26,19 +26,21 @@ CheckStarted;
 CheckControlKey($control_key);
 CheckNotStopped;
 
-my $req = $client->new_request($hyperledger_url);
-my $res = $req->call('invoke', {
-    'chaincodeId' => {
-        'name' => '@HYPERLEDGER_CHAINCODE_ID@'
-    },
-    'ctorMsg' => {
-        'function' => 'StopElection',
-        'args' => [$election_id]
-    }
-});
-if (my $err = $res->error()) {
-    die("$err->{'message'}");
-}
+# my $req = $client->new_request($hyperledger_url);
+# my $res = $req->call('invoke', {
+#     'chaincodeId' => {
+#         'name' => '@HYPERLEDGER_CHAINCODE_ID@'
+#     },
+#     'ctorMsg' => {
+#         'function' => 'StopElection',
+#         'args' => [$election_id]
+#     }
+# });
+# if (my $err = $res->error()) {
+#     die("$err->{'message'}");
+# }
+
+$edata{'state'} = 'stopped';
 
 Log("Poll $title ($election_id) ended");
 print h1($tx->Poll_ended($title));
